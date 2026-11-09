@@ -1,5 +1,3 @@
-"""Telegram chat interface: quick add, lists, task cards, timer, report, assistant."""
-
 from __future__ import annotations
 
 import asyncio
@@ -59,11 +57,7 @@ HELP = """<b>Nosi Tempo</b> — задачі й облік часу.
 /ai — обрати модель, /forget — очистити памʼять розмови"""
 
 
-# -- access ------------------------------------------------------------------
-
-
 class Access(BaseMiddleware):
-    """Lets only OWNER_IDS through and keeps the user row fresh."""
 
     def __init__(self, settings: Settings, store: Store):
         self.settings, self.store = settings, store
@@ -85,9 +79,6 @@ class Access(BaseMiddleware):
             return None
         await self.store.ensure_user(user.id, user.full_name or "")
         return await handler(event, data)
-
-
-# -- callback data -----------------------------------------------------------
 
 
 class ListCb(CallbackData, prefix="l"):
@@ -115,9 +106,6 @@ class Rename(StatesGroup):
     title = State()
 
 
-# -- keyboards ---------------------------------------------------------------
-
-
 def main_kb(settings: Settings) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text=BTN_TODAY), KeyboardButton(text=BTN_INBOX), KeyboardButton(text=BTN_NEXT)],
@@ -140,9 +128,6 @@ def ikb(rows: list[list[tuple[str, CallbackData]]]) -> InlineKeyboardMarkup:
 
 def short(text: str, n: int = 30) -> str:
     return text if len(text) <= n else text[: n - 1] + "…"
-
-
-# -- rendering ---------------------------------------------------------------
 
 
 async def render_list(store: Store, uid: int, view: str, pid: int = 0) -> tuple[str, InlineKeyboardMarkup]:
@@ -195,7 +180,10 @@ def task_card(task: dict, today: date, view: str) -> tuple[str, InlineKeyboardMa
         lines.append("\nВиконано.")
 
     tid = task["id"]
-    cb = lambda action, arg="": TaskCb(action=action, id=tid, arg=arg, view=view)  # noqa: E731
+
+    def cb(action: str, arg: str = "") -> TaskCb:
+        return TaskCb(action=action, id=tid, arg=arg, view=view)
+
     first = [("Повернути", cb("undo"))] if task["done_at"] else [("Готово", cb("done")), ("Старт таймера", cb("go"))]
     rows = [
         first,
@@ -259,9 +247,6 @@ async def edit_or_send(cq: CallbackQuery, text: str, kb: InlineKeyboardMarkup | 
             await cq.message.answer(text, reply_markup=kb)
 
 
-# -- commands and menu -------------------------------------------------------
-
-
 @router.message(CommandStart())
 async def on_start(message: Message, settings: Settings) -> None:
     tail = ""
@@ -314,9 +299,6 @@ async def on_list_cb(cq: CallbackQuery, callback_data: ListCb, store: Store) -> 
     await cq.answer()
 
 
-# -- task card actions -------------------------------------------------------
-
-
 @router.callback_query(TaskCb.filter())
 async def on_task_cb(cq: CallbackQuery, callback_data: TaskCb, store: Store, state: FSMContext) -> None:
     uid, tid, action, view = cq.from_user.id, callback_data.id, callback_data.action, callback_data.view
@@ -330,7 +312,7 @@ async def on_task_cb(cq: CallbackQuery, callback_data: TaskCb, store: Store, sta
     if action in ("done", "ldone"):
         task = await store.complete_task(uid, tid)
         note = f"Наступного разу: {fmt.day(task['due_date'], today)}" if task["recur"] else "Готово"
-        if action == "ldone":  # ticked from a list: redraw the list in place
+        if action == "ldone":
             text, kb = await render_list(store, uid, view, int(callback_data.arg or 0))
             await edit_or_send(cq, text, kb)
             await cq.answer(note)
@@ -378,9 +360,6 @@ async def on_rename(message: Message, state: FSMContext, store: Store) -> None:
     if task:
         text, kb = task_card(task, store.today(), "today")
         await message.answer(text, reply_markup=kb)
-
-
-# -- timer -------------------------------------------------------------------
 
 
 @router.message(Command("timer"))
@@ -456,9 +435,6 @@ async def on_report(message: Message, store: Store) -> None:
     await message.answer(await render_report(store, message.from_user.id))
 
 
-# -- assistant ---------------------------------------------------------------
-
-
 @router.message(Command("ai"))
 async def on_ai(message: Message, command: CommandObject, settings: Settings, store: Store) -> None:
     if command.args:
@@ -504,7 +480,7 @@ async def answer_ai(message: Message, question: str, settings: Settings, store: 
         await message.answer(text[i : i + 4000])
 
 
-# -- quick add (must stay last) ----------------------------------------------
+# має бути останнім хендлером: ловить будь-який текст як нову задачу
 
 
 @router.message(F.text & ~F.text.startswith("/"))
@@ -518,11 +494,7 @@ async def on_text(message: Message, settings: Settings, store: Store) -> None:
     await message.answer("Додано\n\n" + card, reply_markup=kb)
 
 
-# -- wiring ------------------------------------------------------------------
-
-
 async def reminders(bot: Bot, store: Store) -> None:
-    """Every 30 seconds: sends a message for each task whose time has come."""
     while True:
         try:
             for task in await store.due_reminders():
@@ -539,8 +511,8 @@ async def reminders(bot: Bot, store: Store) -> None:
                 await bot.send_message(task["user_id"], f"Час: <b>{escape(task['title'])}</b>", reply_markup=kb)
         except asyncio.CancelledError:
             raise
-        except Exception:  # a failed send must not kill the loop
-            log.exception("reminder loop")
+        except Exception:  # помилка відправки не повинна зупиняти цикл
+            log.exception("помилка в циклі нагадувань")
         await asyncio.sleep(30)
 
 

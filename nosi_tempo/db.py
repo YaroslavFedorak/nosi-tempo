@@ -1,5 +1,3 @@
-"""SQLite storage. One connection for the whole process; every query is scoped to a user."""
-
 from __future__ import annotations
 
 import time
@@ -93,7 +91,6 @@ class Store:
         self.tz = tz
         self.db: aiosqlite.Connection | None = None
 
-    # -- lifecycle -----------------------------------------------------------
 
     async def open(self) -> None:
         if str(self.path) != ":memory:":
@@ -130,7 +127,6 @@ class Store:
     def day_start(self, d: date) -> int:
         return int(datetime(d.year, d.month, d.day, tzinfo=self.tz).timestamp())
 
-    # -- users ---------------------------------------------------------------
 
     async def ensure_user(self, user_id: int, name: str) -> None:
         await self._run(
@@ -146,7 +142,6 @@ class Store:
     async def set_ai_provider(self, user_id: int, provider: str) -> None:
         await self._run("UPDATE users SET ai_provider = ? WHERE id = ?", (provider, user_id))
 
-    # -- projects ------------------------------------------------------------
 
     async def projects(self, user_id: int) -> list[dict]:
         rows = await self._all(
@@ -164,7 +159,7 @@ class Store:
     async def project_id(self, user_id: int, name: str | None, create: bool = True) -> int | None:
         if not name:
             return None
-        # SQLite's NOCASE folds ASCII only, so Cyrillic names are matched here
+        # NOCASE у SQLite працює лише з ASCII, тому кирилицю порівнюємо тут
         key = name.strip().casefold()
         rows = await self._all("SELECT id, name, archived FROM projects WHERE user_id = ?", (user_id,))
         row = next((r for r in rows if r["name"].casefold() == key), None)
@@ -184,7 +179,6 @@ class Store:
             "UPDATE projects SET archived = 1 WHERE id = ? AND user_id = ?", (project_id, user_id)
         )
 
-    # -- tasks ---------------------------------------------------------------
 
     async def add_task(self, user_id: int, parsed: Parsed, notes: str = "") -> dict:
         project_id = await self.project_id(user_id, parsed.project)
@@ -265,11 +259,11 @@ class Store:
         return await self.task(user_id, task_id)
 
     async def complete_task(self, user_id: int, task_id: int) -> dict | None:
-        """Ticks a task off. A repeating one moves to its next date and stays open."""
         task = await self.task(user_id, task_id)
         if not task or task["done_at"]:
             return task
         if task["recur"]:
+            # повторювана задача не закривається, а переїжджає на наступну дату
             base = date.fromisoformat(task["due_date"]) if task["due_date"] else self.today()
             nxt = next_due(base, task["recur"], self.today())
             await self._run(
@@ -290,7 +284,6 @@ class Store:
         await self._run("DELETE FROM tasks WHERE id = ? AND user_id = ?", (task_id, user_id))
 
     async def due_reminders(self) -> list[dict]:
-        """Open tasks with a due time that has passed and no reminder sent yet."""
         current = datetime.now(self.tz)
         rows = await self._all(
             """
@@ -312,7 +305,6 @@ class Store:
     async def mark_reminded(self, task_id: int) -> None:
         await self._run("UPDATE tasks SET reminded = 1 WHERE id = ?", (task_id,))
 
-    # -- time entries --------------------------------------------------------
 
     async def running(self, user_id: int) -> dict | None:
         return await self._one(
@@ -332,7 +324,6 @@ class Store:
         project: str | None = None,
         project_id: int | None = None,
     ) -> dict:
-        """Starts a timer. Whatever was running stops at the same second."""
         stamp = now()
         await self.stop(user_id, stamp)
         if task_id:
@@ -360,7 +351,6 @@ class Store:
     async def log(
         self, user_id: int, title: str, seconds: int, project: str | None = None, ended_at: int | None = None
     ) -> dict:
-        """A manual entry that ends now (or at ended_at) and lasted `seconds`."""
         end = ended_at or now()
         project_id = await self.project_id(user_id, project)
         entry_id = await self._run(
@@ -400,7 +390,6 @@ class Store:
         )
 
     async def report(self, user_id: int, days: int = 7) -> dict:
-        """Time per project and per day for the last `days` days, today included."""
         today = self.today()
         first = today - timedelta(days=days - 1)
         since = self.day_start(first)
@@ -421,7 +410,7 @@ class Store:
             key = e["project"] or "Без проєкту"
             by_project[key] = by_project.get(key, 0) + secs
             by_task[e["title"]] = by_task.get(e["title"], 0) + secs
-            # split across midnights so each day gets its own share
+            # ділимо запис по півночах, щоб кожен день отримав свою частку
             cursor = start
             while cursor < end:
                 day = self.local(cursor).date()
@@ -444,7 +433,6 @@ class Store:
             "by_day": [{"date": k, "seconds": v} for k, v in by_day.items()],
         }
 
-    # -- assistant history ---------------------------------------------------
 
     async def ai_history(self, user_id: int, limit: int = 20) -> list[dict]:
         rows = await self._all(

@@ -29,7 +29,7 @@ def test_tasks_views_and_projects(tmp_path):
         assert [t["title"] for t in await s.tasks(UID, "inbox")] == ["хліб"]
         assert [t["title"] for t in await s.tasks(UID, "upcoming")] == ["ретро"]
         projects = await s.projects(UID)
-        assert len(projects) == 1 and projects[0]["open"] == 2  # #Робота and #робота are one project
+        assert len(projects) == 1 and projects[0]["open"] == 2  # #Робота і #робота — один проєкт
         await s.close()
 
     asyncio.run(go())
@@ -50,7 +50,7 @@ def test_complete_plain_and_repeating(tmp_path):
         assert moved["done_at"] is None and moved["due_date"] > today.isoformat()
 
         assert (await s.reopen_task(UID, once["id"]))["done_at"] is None
-        assert await s.task(UID + 1, once["id"]) is None  # other users see nothing
+        assert await s.task(UID + 1, once["id"]) is None  # чужі задачі не видно
         await s.close()
 
     asyncio.run(go())
@@ -68,7 +68,7 @@ def test_timer_and_report(tmp_path, monkeypatch):
         task = await s.add_task(UID, parse_task("код #api", s.today()))
         await s.start(UID, task_id=task["id"])
         clock[0] += 1500
-        await s.start(UID, title="пошта")  # stops the first one
+        await s.start(UID, title="пошта")  # зупиняє попередній
         clock[0] += 300
         stopped = await s.stop(UID)
         assert stopped["title"] == "пошта"

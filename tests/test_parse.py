@@ -4,7 +4,7 @@ import pytest
 
 from nosi_tempo.parse import next_due, parse_duration, parse_task
 
-MON = date(2026, 11, 9)  # a Monday
+MON = date(2026, 11, 9)  # понеділок
 
 
 def test_plain_title_stays_whole():
@@ -31,7 +31,7 @@ def test_day_after_tomorrow_beats_tomorrow():
         ("Звіт у пт", date(2026, 11, 13)),
         ("Звіт в п'ятницю", date(2026, 11, 13)),
         ("Звіт в пʼятницю", date(2026, 11, 13)),
-        ("Планування пн", date(2026, 11, 16)),  # next Monday, not today
+        ("Планування пн", date(2026, 11, 16)),  # наступний понеділок, а не сьогодні
         ("Оплата 12.11", date(2026, 11, 12)),
         ("Оплата 1.03", date(2027, 3, 1)),
         ("Оплата 2026-12-01", date(2026, 12, 1)),

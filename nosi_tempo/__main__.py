@@ -1,9 +1,3 @@
-"""python -m nosi_tempo — runs the bot (long polling) and the Mini App server in one process.
-
-python -m nosi_tempo --web-only serves just the Mini App; with DEV_USER_ID set it
-answers requests from localhost without Telegram, which is how the UI is previewed.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -23,6 +17,7 @@ from .server import create_app
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # --web-only піднімає лише Mini App, для локальної розробки інтерфейсу
     web_only = "--web-only" in sys.argv
     settings = load_settings(require_token=not web_only)
 
@@ -32,7 +27,7 @@ async def main() -> None:
     runner = web.AppRunner(create_app(settings, store), access_log=None)
     await runner.setup()
     await web.TCPSite(runner, settings.web_host, settings.web_port).start()
-    logging.info("Mini App: http://%s:%s (public: %s)", settings.web_host, settings.web_port, settings.webapp_url or "not set")
+    logging.info("Mini App: http://%s:%s (публічна адреса: %s)", settings.web_host, settings.web_port, settings.webapp_url or "не задана")
 
     if web_only:
         try:

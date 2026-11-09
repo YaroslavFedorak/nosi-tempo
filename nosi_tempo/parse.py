@@ -1,14 +1,3 @@
-"""Quick-add syntax, the same in the bot and in the Mini App.
-
-    Подзвонити мамі завтра о 18:00 #дім !1
-    Звіт щоп'ятниці #робота
-    Спортзал кожні 2 дні
-
-#проєкт sets the project, !1..!4 the priority (1 is the most urgent),
-dates and times are Ukrainian or English words, recurrence words make
-the task repeat after it is ticked off.
-"""
-
 from __future__ import annotations
 
 import calendar
@@ -33,7 +22,7 @@ for idx, names in enumerate(
 
 _WD = "|".join(sorted(map(re.escape, WEEKDAYS), key=len, reverse=True))
 
-# Token boundaries that understand Cyrillic and the apostrophe inside words.
+# межі слова з урахуванням кирилиці та апострофа всередині слова (п'ятниця)
 L = r"(?<![\w'#])"
 R = r"(?![\w'])"
 
@@ -116,7 +105,6 @@ def add_months(d: date, n: int) -> date:
 
 
 def next_due(due: date, recur: str, today: date) -> date:
-    """The next date a repeating task is due once it has been ticked off."""
     if recur == "weekdays":
         d = max(due, today) + timedelta(days=1)
         while d.weekday() >= 5:
@@ -163,7 +151,7 @@ def parse_task(raw: str, today: date) -> Parsed:
         p.priority = int(m.group(1) or m.group(2))
         text = _cut(text, m)
 
-    # Recurrence first: "кожного понеділка" must not be read as a plain weekday.
+    # повтори розбираємо першими, бо «кожного понеділка» — це не просто понеділок
     if m := RX_EVERY_WD.search(text):
         p.recur = "weekly"
         p.due_date = next_weekday(today, WEEKDAYS[m.group(1).lower()], include_today=True)
@@ -209,7 +197,7 @@ def parse_task(raw: str, today: date) -> Parsed:
                 pass
 
     if p.due_date is None:
-        # післязавтра before завтра, so the longer word wins
+        # «післязавтра» перевіряємо раніше за «завтра»
         for offset in (2, 1, 0):
             if m := RX_WORDS[offset].search(text):
                 p.due_date = today + timedelta(days=offset)
@@ -239,7 +227,6 @@ def parse_task(raw: str, today: date) -> Parsed:
 
 
 def parse_duration(raw: str) -> tuple[int, str]:
-    """'1h30m code review' -> (5400, 'code review'). Also '45хв', '1.5г', '1:30'."""
     text = _norm(raw).strip()
     if m := RX_HMM.search(text):
         secs = int(m.group(1)) * 3600 + int(m.group(2)) * 60

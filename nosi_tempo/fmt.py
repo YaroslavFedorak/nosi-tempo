@@ -1,5 +1,3 @@
-"""Small formatting helpers shared by the bot and the assistant prompt."""
-
 from __future__ import annotations
 
 from datetime import date
@@ -12,7 +10,6 @@ WEEKDAYS_SHORT = ["пн", "вт", "ср", "чт", "пт", "сб", "нд"]
 
 
 def duration(seconds: int) -> str:
-    """5400 -> '1 год 30 хв', 59 -> '<1 хв'."""
     seconds = max(0, int(seconds))
     hours, rest = divmod(seconds, 3600)
     minutes = rest // 60
@@ -26,7 +23,6 @@ def duration(seconds: int) -> str:
 
 
 def clock(seconds: int) -> str:
-    """5400 -> '1:30:00'."""
     seconds = max(0, int(seconds))
     h, rest = divmod(seconds, 3600)
     m, s = divmod(rest, 60)
@@ -52,7 +48,6 @@ def day(d: date | str | None, today: date) -> str:
 
 
 def task_meta(task: dict, today: date) -> str:
-    """'завтра 18:00, #дім, щотижня' for one task; empty when there is nothing to say."""
     bits = []
     if task.get("due_date"):
         due = day(task["due_date"], today)

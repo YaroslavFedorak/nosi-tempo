@@ -1,5 +1,3 @@
-"""Settings read from the environment (or a .env file next to the project)."""
-
 from __future__ import annotations
 
 import os
@@ -58,7 +56,7 @@ def load_settings(require_token: bool = True) -> Settings:
 
     token = env("BOT_TOKEN", "").strip()
     if not token and require_token:
-        raise SystemExit("BOT_TOKEN is empty. Copy .env.example to .env and fill it in.")
+        raise SystemExit("BOT_TOKEN порожній. Скопіюй .env.example у .env і заповни його.")
 
     db_path = Path(env("DB_PATH", "") or ROOT / "data" / "tempo.db")
     dev_user = env("DEV_USER_ID", "").strip()

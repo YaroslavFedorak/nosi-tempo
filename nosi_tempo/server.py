@@ -1,5 +1,3 @@
-"""HTTP side: serves the Mini App and its JSON API, signed by Telegram initData."""
-
 from __future__ import annotations
 
 import hashlib
@@ -24,7 +22,7 @@ store_key = web.AppKey("store", Store)
 
 
 def verify_init_data(init_data: str, bot_token: str) -> dict | None:
-    """Checks Telegram's HMAC over initData; returns the user or None."""
+    # https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app
     fields = dict(parse_qsl(init_data, keep_blank_values=True))
     received = fields.pop("hash", "")
     if not received:
@@ -64,7 +62,7 @@ async def auth(request: web.Request, handler):
 
 @web.middleware
 async def revalidate(request: web.Request, handler):
-    """Telegram's webview caches hard; make it ask again after every deploy."""
+    # вебвʼю Telegram агресивно кешує статику, тому просимо перевіряти її щоразу
     response = await handler(request)
     if request.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache"
@@ -82,7 +80,7 @@ async def _body(request: web.Request) -> dict:
     try:
         data = await request.json()
     except (json.JSONDecodeError, UnicodeDecodeError):
-        raise web.HTTPBadRequest(text='{"error":"bad json"}', content_type="application/json")
+        raise web.HTTPBadRequest(text='{"error":"Некоректний JSON."}', content_type="application/json")
     return data if isinstance(data, dict) else {}
 
 

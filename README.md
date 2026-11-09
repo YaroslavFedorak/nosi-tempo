@@ -1,124 +1,117 @@
 # Nosi Tempo
 
-Особистий Telegram-бот для задач і обліку часу. Задачі записуються одним повідомленням,
-таймер запускається з будь-якої задачі, а тижневий звіт показує, куди пішов час.
-Є Mini App з тими самими даними і асистент, який бачить твої задачі
-(Gemini, Claude або ChatGPT на вибір).
+A personal task manager and time tracker that lives in Telegram: a chat bot for quick input
+and a Mini App for everything else. Think of a small Todoist and Toggl Track in one place,
+with an LLM assistant that can read your tasks and plan with you.
 
-Колись це був NoProgresSi. Від нього лишилась ідея, код написаний заново.
+The interface is in Ukrainian.
 
-## Що вміє
+<p>
+  <img src="docs/tasks.png" width="260" alt="Today list with a running timer">
+  <img src="docs/timer.png" width="260" alt="Time entries grouped by day">
+  <img src="docs/report.png" width="260" alt="Weekly report by project and day">
+</p>
 
-**Задачі.** Пишеш боту звичайним текстом, він сам розбирає дату, час, проєкт і пріоритет:
+## Features
 
-```
-Подзвонити мамі завтра о 18:00 #дім !1
-Звіт щоп'ятниці #робота
-Спортзал кожні 2 дні
-Оплатити інтернет 25.11
-```
+**Tasks**
+- Natural-language quick add, in the chat or the Mini App:
+  `Подзвонити мамі завтра о 18:00 #дім !1` becomes a task due tomorrow at 18:00
+  in the project «дім» with priority 1.
+- Dates (`завтра`, `пт`, `12.11`, `через 3 дні`), times, projects, priorities.
+- Recurring tasks (`щодня`, `по буднях`, `щоп'ятниці`, `кожні 2 дні`): completing one moves
+  it to the next date instead of closing it.
+- Today (with overdue), Inbox, Upcoming and per-project views.
+- Reminders sent by the bot when a task's time comes.
 
-- дати: `сьогодні`, `завтра`, `післязавтра`, `пн`…`нд`, `12.11`, `2026-12-01`, `через 3 дні`;
-- час: `о 18:00`, `о 9`, `14:30`;
-- повтори: `щодня`, `по буднях`, `щотижня`, `щомісяця`, `кожного понеділка`, `кожні N днів`;
-- `#проєкт` створює проєкт, якщо його ще нема; `!1` найвищий пріоритет, `!4` звичайний.
+**Time tracking**
+- Start a timer from any task or with `/go title #project`. Starting a new timer stops
+  the running one, so there are never two.
+- Manual entries: `/log 45m code review #work`, `/log 1:30 design`.
+- Reports for today, 7 and 30 days: totals by project, by day and by task.
 
-Списки «Сьогодні» (разом із простроченими), «Вхідні» і «Наступні 14 днів». Повторювана
-задача після «Готово» переїжджає на наступну дату. Якщо в задачі є час, бот нагадає.
+**Assistant**
+- Gemini, Claude or any OpenAI-compatible model, switchable per user.
+- Sees open tasks, the running timer and the week's time, so it can answer
+  "what should I do first?" with your actual data.
+- Can create tasks: the model replies with `ADD: ...` lines that go through the same
+  quick-add parser.
 
-**Час.** Кнопка «Старт таймера» на задачі, або `/go назва #проєкт`. Новий таймер зупиняє
-попередній, тож забути вимкнути старий не вийде. Забув запустити — `/log 45m рев'ю #робота`
-або `/log 1:30 дизайн`. `/report` показує тиждень по проєктах, днях і задачах.
+## Stack
 
-**Асистент.** Повідомлення зі знаком питання на початку (`? що мені зробити першим`)
-або вкладка «Асистент» у Mini App. Він бачить відкриті задачі, таймер і час за тиждень.
-Якщо попросити розписати план, сам додасть задачі. `/ai` перемикає модель, `/forget` чистить
-історію розмови.
+- Python 3.11+, asyncio
+- [aiogram 3](https://docs.aiogram.dev/) for the bot, aiohttp for the Mini App API
+- SQLite via aiosqlite
+- Mini App: plain HTML, CSS and JavaScript, no build step
+- pytest
 
-## Запуск на своєму компʼютері
+## How it works
 
-Потрібен Python 3.11 або новіший.
+One process runs both the bot (long polling) and the HTTP server for the Mini App,
+sharing a single SQLite connection.
+
+A few parts worth a look:
+
+- **`parse.py`** turns free text into a task. Regexes use custom word boundaries so Cyrillic
+  words with apostrophes (`п'ятниця`) are matched whole, and recurrence is parsed before plain
+  weekdays so `кожного понеділка` is not read as "next Monday".
+- **One running timer per user** is enforced by the database itself, with a partial unique
+  index on `entries(user_id) WHERE stopped_at IS NULL`.
+- **Reports** split an entry that crosses midnight between the two days.
+- **Mini App auth**: every API request carries Telegram `initData`, checked with HMAC-SHA256
+  against the bot token as described in the
+  [Telegram docs](https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app).
+  `OWNER_IDS` limits the bot and the API to listed users.
+- **AI providers** are called over plain HTTP with no SDKs, so adding one is a single function.
+
+## Running locally
 
 ```bash
 python -m venv .venv
-.venv\Scripts\activate          # Windows; на Linux/macOS: source .venv/bin/activate
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-copy .env.example .env          # на Linux/macOS: cp
-```
-
-У `.env` впиши `BOT_TOKEN` від [@BotFather](https://t.me/BotFather) і запусти:
-
-```bash
+cp .env.example .env             # set BOT_TOKEN, OWNER_IDS and optionally an AI key
 python -m nosi_tempo
 ```
 
-Напиши боту `/start`: він покаже твій id. Впиши його в `OWNER_IDS` і перезапусти.
-Після цього бот відповідає тільки тобі, і ніхто інший не витратить твої ключі ШІ.
+The Mini App is served on `PORT` (8080 by default). Telegram opens Mini Apps only over HTTPS,
+so set `WEBAPP_URL` to a public address that proxies to it; the bot then adds a menu button.
 
-Дані лежать у `data/tempo.db` (SQLite). Бекап — просто скопіювати цей файл.
-
-## Mini App
-
-Telegram відкриває Mini App тільки за HTTPS-адресою. Сервер уже вбудований
-(той самий процес, порт `PORT`), потрібна лише публічна адреса.
-
-Безкоштовно і без домену: [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/do-more-with-tunnels/trycloudflare/).
+To work on the UI without Telegram:
 
 ```bash
-cloudflared tunnel --url http://localhost:8080
+python scripts/dev_web.py        # http://127.0.0.1:8770, local dev database, no auth from localhost
 ```
 
-Він видасть адресу на кшталт `https://xxxx.trycloudflare.com`. Впиши її у `WEBAPP_URL`
-і перезапусти бота: зʼявиться кнопка «Відкрити Nosi Tempo» і кнопка меню в чаті.
-Тимчасова адреса міняється при кожному запуску тунелю. Щоб вона була постійною,
-потрібен іменований тунель і свій домен.
+Docker:
 
-Подивитися інтерфейс без Telegram: `python scripts/dev_web.py`, потім
-http://127.0.0.1:8770 (окрема база `data/dev.db`, вхід без перевірки підпису, тільки з localhost).
-
-## Щоб працював цілодобово
-
-Бот працює через long polling, тож вхідний порт йому не потрібен, тільки Mini App.
-Варіанти без оплати (умови в провайдерів змінюються, перевір перед вибором):
-
-- безкоштовна віртуалка (Oracle Cloud Always Free, Google Cloud e2-micro): `docker build -t nosi-tempo .`
-  і `docker run -d --restart unless-stopped --env-file .env -v tempo:/data -p 8080:8080 nosi-tempo`,
-  а для HTTPS — той самий Cloudflare Tunnel;
-- старий ноутбук чи Raspberry Pi вдома з тим самим набором.
-
-Безкоштовні тарифи PaaS, які засинають або стирають диск між перезапусками, сюди погано
-підходять: таймер і нагадування живуть у процесі, а база — у файлі.
-
-## Ключі для асистента
-
-Достатньо одного:
-
-| Модель | Змінна | Ціна |
-|---|---|---|
-| Gemini | `GEMINI_API_KEY` з [Google AI Studio](https://aistudio.google.com/apikey) | є безкоштовний ліміт |
-| Claude | `ANTHROPIC_API_KEY` з [console.anthropic.com](https://console.anthropic.com/) | оплата за токени, Haiku найдешевша |
-| ChatGPT | `OPENAI_API_KEY` з [platform.openai.com](https://platform.openai.com/api-keys) | оплата за токени |
-
-Підписка ChatGPT Plus чи Claude Pro до API не дає доступу, це окремі рахунки.
-`OPENAI_BASE_URL` приймає будь-який сумісний з OpenAI сервіс, тож туди можна підставити
-Groq, OpenRouter (у них є безкоштовні моделі) або локальну Ollama. Модель міняється
-змінними `*_MODEL`, без правок коду.
-
-## Структура
-
+```bash
+docker build -t nosi-tempo .
+docker run -d --env-file .env -v tempo:/data -p 8080:8080 nosi-tempo
 ```
-nosi_tempo/
-  __main__.py   запуск: бот + вебсервер в одному процесі
-  bot.py        команди, кнопки, нагадування
-  server.py     API для Mini App, перевірка підпису Telegram
-  db.py         SQLite: задачі, проєкти, записи часу
-  parse.py      розбір «завтра о 18:00 #дім !1» і тривалостей
-  ai.py         Gemini, Claude, OpenAI через звичайні HTTP-запити
-  web/static/   Mini App: HTML, CSS, JS без збірки
-tests/          pytest
-```
+
+## Tests
 
 ```bash
 pip install pytest
 python -m pytest
+```
+
+Covered: the quick-add and duration parsers, recurrence rules, task views, timers and reports,
+and `initData` signature checks.
+
+## Structure
+
+```
+nosi_tempo/
+  __main__.py     entry point: bot and web server in one event loop
+  bot.py          commands, inline keyboards, reminders
+  server.py       Mini App API and initData validation
+  db.py           SQLite schema and queries
+  parse.py        quick-add and duration parsing
+  ai.py           Gemini, Claude and OpenAI-compatible clients
+  fmt.py          formatting helpers
+  web/static/     Mini App
+tests/
+scripts/dev_web.py
 ```

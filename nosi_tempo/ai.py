@@ -1,10 +1,3 @@
-"""The assistant: one prompt, three providers (Gemini, Claude, OpenAI-compatible).
-
-No SDKs: plain HTTPS calls, so swapping a model is an env var, not a dependency.
-The assistant sees your open tasks, the running timer and the week's time,
-and can add tasks by writing lines that start with "ADD:".
-"""
-
 from __future__ import annotations
 
 import re
@@ -19,6 +12,7 @@ from .parse import parse_task
 
 LABELS = {"gemini": "Gemini", "claude": "Claude", "openai": "ChatGPT"}
 TIMEOUT = aiohttp.ClientTimeout(total=90)
+# асистент додає задачі рядками «ADD: ...», ми їх парсимо і прибираємо з відповіді
 RX_ADD = re.compile(r"^\s*ADD:\s*(.+?)\s*$", re.MULTILINE)
 
 
@@ -135,7 +129,6 @@ CALLS = {"claude": _claude, "openai": _openai, "gemini": _gemini}
 
 
 async def ask(settings: Settings, store: Store, user_id: int, message: str, provider: str | None = None) -> dict:
-    """Sends one message with recent history; returns the reply and any tasks it added."""
     name = pick_provider(settings, provider or await store.ai_provider(user_id))
     history = await store.ai_history(user_id, 12)
     msgs = [{"role": h["role"], "content": h["content"]} for h in history]

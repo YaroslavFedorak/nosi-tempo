@@ -1,4 +1,3 @@
-// Nosi Tempo Mini App. No build step: plain DOM, one file.
 "use strict";
 
 const tg = window.Telegram?.WebApp;
@@ -8,14 +7,12 @@ const main = $("#main");
 const S = {
   tz: "",
   today: "",
-  offset: 0,          // server clock minus ours, seconds
+  offset: 0,          // різниця між годинником сервера і клієнта, с
   running: null,
   projects: [],
-  open: null,         // task id with the editor open
+  open: null,
   tick: null,
 };
-
-// ---------------------------------------------------------------- helpers
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const nowSec = () => Math.floor(Date.now() / 1000) + S.offset;
@@ -78,8 +75,6 @@ async function api(path, opts = {}) {
   return data;
 }
 
-// ---------------------------------------------------------------- toast
-
 let toastTimer = null;
 function toast(text, undo) {
   const el = $("#toast"), btn = $("#toast-undo");
@@ -91,8 +86,6 @@ function toast(text, undo) {
   toastTimer = setTimeout(() => (el.hidden = true), undo ? 5000 : 2500);
 }
 
-// ---------------------------------------------------------------- the clock
-
 function setRunning(entry, serverNow) {
   if (serverNow) S.offset = serverNow - Math.floor(Date.now() / 1000);
   S.running = entry || null;
@@ -101,7 +94,7 @@ function setRunning(entry, serverNow) {
   if (!S.running) { box.hidden = true; return; }
   box.hidden = false;
   $("#clock-title").textContent = S.running.title;
-  const bits = [`з ${timeOf(S.running.started_at)} ${S.tz}`];
+  const bits = [`з ${timeOf(S.running.started_at)}`];
   if (S.running.project) bits.unshift(`#${S.running.project}`);
   $("#clock-meta").textContent = bits.join(", ");
   const paint = () => ($("#clock-time").textContent = clock(nowSec() - S.running.started_at));
@@ -129,14 +122,10 @@ async function startTimer(body) {
   return running;
 }
 
-// ---------------------------------------------------------------- states
-
 const skeleton = (n = 5) => `<div class="skeleton" aria-hidden="true">${"<span></span>".repeat(n)}</div><p class="visually-hidden">Завантаження</p>`;
 const errorState = (msg) => `<div class="state state--error"><p>${esc(msg)}</p><button class="btn" type="button" data-retry>Спробувати ще раз</button></div>`;
 
 main.addEventListener("click", (e) => { if (e.target.closest("[data-retry]")) route(); });
-
-// ---------------------------------------------------------------- tasks
 
 const VIEWS = [["today", "Сьогодні"], ["inbox", "Вхідні"], ["upcoming", "Наступні"]];
 const EMPTY = {
@@ -272,7 +261,7 @@ async function loadList(view, pid) {
 
 function bindRows(list, tasks, view, pid) {
   const byId = new Map(tasks.map((t) => [t.id, t]));
-  // assigned, not added: the list node survives reloads and must hold one handler
+  // присвоюємо, а не addEventListener: вузол списку живе між перезавантаженнями
   list.onclick = async (e) => {
     const btn = e.target.closest("[data-act]");
     if (!btn) return;
@@ -325,8 +314,6 @@ function confirmAsk(text) {
   if (tg?.showConfirm) return new Promise((ok) => tg.showConfirm(text, ok));
   return Promise.resolve(window.confirm(text));
 }
-
-// ---------------------------------------------------------------- time
 
 async function viewTimer() {
   main.innerHTML = `
@@ -411,8 +398,6 @@ async function loadEntries() {
   }
 }
 
-// ---------------------------------------------------------------- report
-
 async function viewReport(range) {
   const ranges = [["today", "Сьогодні"], ["week", "7 днів"], ["month", "30 днів"]];
   main.innerHTML = `
@@ -447,8 +432,6 @@ async function viewReport(range) {
     box.innerHTML = errorState(err.message);
   }
 }
-
-// ---------------------------------------------------------------- assistant
 
 async function viewAI() {
   main.innerHTML = `<section id="ai">${skeleton(3)}</section>`;
@@ -528,8 +511,6 @@ async function viewAI() {
     wait.scrollIntoView?.({ block: "end" });
   });
 }
-
-// ---------------------------------------------------------------- router
 
 function paintTopDate() {
   if (!S.today) return;

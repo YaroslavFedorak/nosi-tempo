@@ -13,7 +13,5 @@ venv/
 .vs/
 .vscode/
 .idea/
-.claude/
 
-# leftovers of the old bot, kept locally for its database
 /bot/
