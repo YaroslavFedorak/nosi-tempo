@@ -1,0 +1,19 @@
+.env
+data/
+*.db
+*.db-wal
+*.db-shm
+
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+
+.vs/
+.vscode/
+.idea/
+.claude/
+
+# leftovers of the old bot, kept locally for its database
+/bot/
