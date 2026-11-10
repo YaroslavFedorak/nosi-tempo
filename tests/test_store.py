@@ -1,16 +1,9 @@
 import asyncio
-import hashlib
-import hmac
-import json
-import time
-from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
-
 
 from nosi_tempo import db
 from nosi_tempo.db import Store
 from nosi_tempo.parse import parse_task
-from nosi_tempo.server import verify_init_data
 
 UID = 42
 
@@ -82,16 +75,3 @@ def test_timer_and_report(tmp_path, monkeypatch):
         await s.close()
 
     asyncio.run(go())
-
-
-def test_init_data_signature():
-    token = "123:abc"
-    fields = {"auth_date": str(int(time.time())), "user": json.dumps({"id": 7, "first_name": "Y"})}
-    check = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
-    secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
-    fields["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
-    signed = urlencode(fields)
-
-    assert verify_init_data(signed, token)["id"] == 7
-    assert verify_init_data(signed, "123:other") is None
-    assert verify_init_data(signed.replace("Y", "Z"), token) is None

@@ -20,10 +20,6 @@ class Settings:
     owner_ids: frozenset[int]
     tz: ZoneInfo
     db_path: Path
-    webapp_url: str
-    web_host: str
-    web_port: int
-    dev_user_id: int | None
 
     anthropic_key: str
     anthropic_model: str
@@ -33,10 +29,6 @@ class Settings:
     gemini_key: str
     gemini_model: str
     ai_default: str
-
-    @property
-    def tz_label(self) -> str:
-        return self.tz.key.split("/")[-1].replace("_", " ")
 
     def allowed(self, user_id: int) -> bool:
         return not self.owner_ids or user_id in self.owner_ids
@@ -50,26 +42,21 @@ class Settings:
         return [name for name, key in keys.items() if key]
 
 
-def load_settings(require_token: bool = True) -> Settings:
+def load_settings() -> Settings:
     load_dotenv(ROOT / ".env")
     env = os.environ.get
 
     token = env("BOT_TOKEN", "").strip()
-    if not token and require_token:
+    if not token:
         raise SystemExit("BOT_TOKEN порожній. Скопіюй .env.example у .env і заповни його.")
 
     db_path = Path(env("DB_PATH", "") or ROOT / "data" / "tempo.db")
-    dev_user = env("DEV_USER_ID", "").strip()
 
     return Settings(
         bot_token=token,
         owner_ids=_ids(env("OWNER_IDS", "")),
         tz=ZoneInfo(env("TZ_NAME", "Europe/Kyiv")),
         db_path=db_path,
-        webapp_url=env("WEBAPP_URL", "").strip().rstrip("/"),
-        web_host=env("WEB_HOST", "0.0.0.0"),
-        web_port=int(env("PORT", env("WEB_PORT", "8080"))),
-        dev_user_id=int(dev_user) if dev_user else None,
         anthropic_key=env("ANTHROPIC_API_KEY", "").strip(),
         anthropic_model=env("ANTHROPIC_MODEL", "claude-haiku-5-5"),
         openai_key=env("OPENAI_API_KEY", "").strip(),

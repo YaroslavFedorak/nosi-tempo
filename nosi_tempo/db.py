@@ -174,11 +174,6 @@ class Store:
             (user_id, name.strip()[:60], now()),
         )
 
-    async def archive_project(self, user_id: int, project_id: int) -> None:
-        await self._run(
-            "UPDATE projects SET archived = 1 WHERE id = ? AND user_id = ?", (project_id, user_id)
-        )
-
 
     async def add_task(self, user_id: int, parsed: Parsed, notes: str = "") -> dict:
         project_id = await self.project_id(user_id, parsed.project)
@@ -361,9 +356,6 @@ class Store:
             f"SELECT {ENTRY_COLUMNS} FROM entries e LEFT JOIN projects p ON p.id = e.project_id WHERE e.id = ?",
             (entry_id,),
         )
-
-    async def delete_entry(self, user_id: int, entry_id: int) -> None:
-        await self._run("DELETE FROM entries WHERE id = ? AND user_id = ?", (entry_id, user_id))
 
     async def entries(self, user_id: int, since: int, until: int | None = None) -> list[dict]:
         return await self._all(

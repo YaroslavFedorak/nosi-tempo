@@ -18,11 +18,9 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     KeyboardButton,
-    MenuButtonWebApp,
     Message,
     ReplyKeyboardMarkup,
     TelegramObject,
-    WebAppInfo,
 )
 
 from . import ai, fmt
@@ -111,8 +109,6 @@ def main_kb(settings: Settings) -> ReplyKeyboardMarkup:
         [KeyboardButton(text=BTN_TODAY), KeyboardButton(text=BTN_INBOX), KeyboardButton(text=BTN_NEXT)],
         [KeyboardButton(text=BTN_TIMER), KeyboardButton(text=BTN_REPORT), KeyboardButton(text=BTN_PROJECTS)],
     ]
-    if settings.webapp_url:
-        rows.append([KeyboardButton(text="Відкрити Nosi Tempo", web_app=WebAppInfo(url=settings.webapp_url))])
     return ReplyKeyboardMarkup(
         keyboard=rows, resize_keyboard=True, input_field_placeholder="Нова задача або ? питання"
     )
@@ -536,7 +532,3 @@ async def setup(bot: Bot, dp: Dispatcher, settings: Settings, store: Store) -> N
             BotCommand(command="help", description="Як користуватися"),
         ]
     )
-    if settings.webapp_url:
-        await bot.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(text="Tempo", web_app=WebAppInfo(url=settings.webapp_url))
-        )

@@ -1,1 +1,1 @@
-web: python -m nosi_tempo
+worker: python -m nosi_tempo
