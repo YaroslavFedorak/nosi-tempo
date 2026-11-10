@@ -5,41 +5,37 @@ from dataclasses import dataclass
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from cryptography.fernet import Fernet
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def _ids(raw: str) -> frozenset[int]:
-    return frozenset(int(x) for x in raw.replace(";", ",").split(",") if x.strip())
-
-
 @dataclass(frozen=True)
 class Settings:
     bot_token: str
-    owner_ids: frozenset[int]
     tz: ZoneInfo
     db_path: Path
+    secret_key: bytes
 
-    anthropic_key: str
     anthropic_model: str
-    openai_key: str
     openai_model: str
     openai_base_url: str
-    gemini_key: str
     gemini_model: str
-    ai_default: str
 
-    def allowed(self, user_id: int) -> bool:
-        return not self.owner_ids or user_id in self.owner_ids
 
-    def ai_providers(self) -> list[str]:
-        keys = {
-            "gemini": self.gemini_key,
-            "claude": self.anthropic_key,
-            "openai": self.openai_key,
-        }
-        return [name for name, key in keys.items() if key]
+def _secret_key(db_path: Path) -> bytes:
+    # ключем шифруються API-ключі користувачів; якщо його не задано, створюємо один раз поруч із базою
+    raw = os.environ.get("SECRET_KEY", "").strip()
+    if raw:
+        return raw.encode()
+    path = db_path.parent / "secret.key"
+    if path.exists():
+        return path.read_bytes().strip()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    key = Fernet.generate_key()
+    path.write_bytes(key)
+    return key
 
 
 def load_settings() -> Settings:
@@ -54,15 +50,11 @@ def load_settings() -> Settings:
 
     return Settings(
         bot_token=token,
-        owner_ids=_ids(env("OWNER_IDS", "")),
         tz=ZoneInfo(env("TZ_NAME", "Europe/Kyiv")),
         db_path=db_path,
-        anthropic_key=env("ANTHROPIC_API_KEY", "").strip(),
+        secret_key=_secret_key(db_path),
         anthropic_model=env("ANTHROPIC_MODEL", "claude-haiku-5-5"),
-        openai_key=env("OPENAI_API_KEY", "").strip(),
         openai_model=env("OPENAI_MODEL", "gpt-5-mini"),
         openai_base_url=env("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
-        gemini_key=env("GEMINI_API_KEY", "").strip(),
         gemini_model=env("GEMINI_MODEL", "gemini-flash-latest"),
-        ai_default=env("AI_DEFAULT", "gemini"),
     )

@@ -1,7 +1,8 @@
 # Nosi Tempo
 
-A personal task manager and time tracker as a Telegram bot. Think of a small Todoist and
-Toggl Track in one chat, with an LLM assistant that can read your tasks and plan with you.
+A task manager and time tracker as a Telegram bot. Think of a small Todoist and
+Toggl Track in one chat, with an optional LLM assistant that can read your tasks and plan with you.
+Anyone can use it; every user's data is separate.
 
 The bot speaks Ukrainian.
 
@@ -24,8 +25,13 @@ The bot speaks Ukrainian.
 - Manual entries: `/log 45m code review #work`, `/log 1:30 design`.
 - `/report`: the week's time by project, by day and by task.
 
-**Assistant**
-- Gemini, Claude or any OpenAI-compatible model, switchable with `/ai`.
+**Assistant (optional)**
+- Each user connects their own API key right in the chat: Gemini, Claude or any
+  OpenAI-compatible model. The bot offers it once after `/start`; the user can skip it,
+  and `/ai` adds a key at any time.
+- Without a key the assistant stays out of the way: no hints, no disabled buttons.
+- Keys are checked against the provider, the message with the key is deleted from the chat,
+  and the key is stored encrypted.
 - Sees open tasks, the running timer and the week's time, so it can answer
   `? what should I do first` with your actual data.
 - Can create tasks: the model replies with `ADD: ...` lines that go through the same
@@ -41,14 +47,15 @@ The bot speaks Ukrainian.
 | `/go title #project`, `/stop`, `/timer` | timer |
 | `/log 45m title #project` | add time manually |
 | `/report` | weekly report |
-| `/ai`, `/forget` | choose the model, clear the conversation |
+| `/ai` | connect a key, switch or remove models |
+| `/forget` | clear the conversation with the assistant |
 
 ## Stack
 
 - Python 3.11+, asyncio
 - [aiogram 3](https://docs.aiogram.dev/)
 - SQLite via aiosqlite
-- aiohttp for the LLM APIs
+- aiohttp for the LLM APIs, cryptography (Fernet) for stored keys
 - pytest
 
 ## How it works
@@ -59,7 +66,8 @@ The bot speaks Ukrainian.
 - **One running timer per user** is enforced by the database itself, with a partial unique
   index on `entries(user_id) WHERE stopped_at IS NULL`.
 - **Reports** split an entry that crosses midnight between the two days.
-- **Access**: a middleware lets through only the users listed in `OWNER_IDS`.
+- **API keys** are encrypted with Fernet before they reach SQLite. The encryption key comes from
+  `SECRET_KEY` or is generated once into `data/secret.key`.
 - **Reminders** run as a background task next to polling and check due tasks every 30 seconds.
 - **AI providers** are called over plain HTTP with no SDKs, so adding one is a single function.
 
@@ -69,7 +77,7 @@ The bot speaks Ukrainian.
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env             # set BOT_TOKEN, OWNER_IDS and optionally an AI key
+cp .env.example .env             # set BOT_TOKEN
 python -m nosi_tempo
 ```
 
@@ -87,7 +95,8 @@ pip install pytest
 python -m pytest
 ```
 
-Covered: the quick-add and duration parsers, recurrence rules, task views, timers and reports.
+Covered: the quick-add and duration parsers, recurrence rules, task views, timers, reports,
+encrypted key storage and the schema migration.
 
 ## Structure
 

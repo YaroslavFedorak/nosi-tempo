@@ -7,6 +7,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import aiosqlite
+from cryptography.fernet import Fernet, InvalidToken
 
 from .parse import Parsed, next_due
 
@@ -18,7 +19,16 @@ CREATE TABLE IF NOT EXISTS users (
     id          INTEGER PRIMARY KEY,
     name        TEXT NOT NULL DEFAULT '',
     ai_provider TEXT,
+    ai_offered  INTEGER NOT NULL DEFAULT 0,
     created_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS ai_keys (
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    provider   TEXT NOT NULL,
+    secret     BLOB NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, provider)
 );
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -86,9 +96,10 @@ def now() -> int:
 
 
 class Store:
-    def __init__(self, path: Path, tz: ZoneInfo):
+    def __init__(self, path: Path, tz: ZoneInfo, secret_key: bytes | None = None):
         self.path = path
         self.tz = tz
+        self.fernet = Fernet(secret_key or Fernet.generate_key())
         self.db: aiosqlite.Connection | None = None
 
 
@@ -98,6 +109,9 @@ class Store:
         self.db = await aiosqlite.connect(self.path)
         self.db.row_factory = aiosqlite.Row
         await self.db.executescript(SCHEMA)
+        columns = {r["name"] for r in await self._all("PRAGMA table_info(users)")}
+        if "ai_offered" not in columns:
+            await self.db.execute("ALTER TABLE users ADD COLUMN ai_offered INTEGER NOT NULL DEFAULT 0")
         await self.db.commit()
 
     async def close(self) -> None:
@@ -139,8 +153,45 @@ class Store:
         row = await self._one("SELECT ai_provider FROM users WHERE id = ?", (user_id,))
         return row["ai_provider"] if row else None
 
-    async def set_ai_provider(self, user_id: int, provider: str) -> None:
+    async def set_ai_provider(self, user_id: int, provider: str | None) -> None:
         await self._run("UPDATE users SET ai_provider = ? WHERE id = ?", (provider, user_id))
+
+    async def ai_offered(self, user_id: int) -> bool:
+        row = await self._one("SELECT ai_offered FROM users WHERE id = ?", (user_id,))
+        return bool(row and row["ai_offered"])
+
+    async def mark_ai_offered(self, user_id: int) -> None:
+        await self._run("UPDATE users SET ai_offered = 1 WHERE id = ?", (user_id,))
+
+    async def ai_key_providers(self, user_id: int) -> list[str]:
+        rows = await self._all("SELECT provider FROM ai_keys WHERE user_id = ? ORDER BY created_at", (user_id,))
+        return [r["provider"] for r in rows]
+
+    async def ai_key(self, user_id: int, provider: str) -> str | None:
+        row = await self._one(
+            "SELECT secret FROM ai_keys WHERE user_id = ? AND provider = ?", (user_id, provider)
+        )
+        if not row:
+            return None
+        try:
+            return self.fernet.decrypt(row["secret"]).decode()
+        except InvalidToken:
+            # ключ шифрування змінився, старий запис уже не прочитати
+            return None
+
+    async def set_ai_key(self, user_id: int, provider: str, key: str) -> None:
+        await self._run(
+            "INSERT INTO ai_keys (user_id, provider, secret, created_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(user_id, provider) DO UPDATE SET secret = excluded.secret, created_at = excluded.created_at",
+            (user_id, provider, self.fernet.encrypt(key.encode()), now()),
+        )
+        await self.set_ai_provider(user_id, provider)
+
+    async def delete_ai_key(self, user_id: int, provider: str) -> None:
+        await self._run("DELETE FROM ai_keys WHERE user_id = ? AND provider = ?", (user_id, provider))
+        if await self.ai_provider(user_id) == provider:
+            rest = await self.ai_key_providers(user_id)
+            await self.set_ai_provider(user_id, rest[0] if rest else None)
 
 
     async def projects(self, user_id: int) -> list[dict]:

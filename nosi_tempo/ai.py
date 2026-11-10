@@ -11,6 +11,11 @@ from .fmt import WEEKDAYS_SHORT, duration, task_meta
 from .parse import parse_task
 
 LABELS = {"gemini": "Gemini", "claude": "Claude", "openai": "ChatGPT"}
+KEY_HELP = {
+    "gemini": ("aistudio.google.com/apikey", "безкоштовний ліміт"),
+    "claude": ("console.anthropic.com/settings/keys", "оплата за використання"),
+    "openai": ("platform.openai.com/api-keys", "оплата за використання"),
+}
 TIMEOUT = aiohttp.ClientTimeout(total=90)
 # асистент додає задачі рядками «ADD: ...», ми їх парсимо і прибираємо з відповіді
 RX_ADD = re.compile(r"^\s*ADD:\s*(.+?)\s*$", re.MULTILINE)
@@ -20,17 +25,12 @@ class AIError(Exception):
     pass
 
 
-def pick_provider(settings: Settings, preferred: str | None) -> str:
-    available = settings.ai_providers()
-    if not available:
-        raise AIError(
-            "Жоден ключ ШІ не задано. Додай у .env GEMINI_API_KEY (безкоштовний), "
-            "ANTHROPIC_API_KEY або OPENAI_API_KEY."
-        )
-    for name in (preferred, settings.ai_default):
-        if name in available:
-            return name
-    return available[0]
+async def pick_provider(store: Store, user_id: int) -> str | None:
+    available = await store.ai_key_providers(user_id)
+    preferred = await store.ai_provider(user_id)
+    if preferred in available:
+        return preferred
+    return available[0] if available else None
 
 
 async def build_context(store: Store, user_id: int) -> str:
@@ -61,7 +61,7 @@ async def build_context(store: Store, user_id: int) -> str:
     return "\n".join(lines)
 
 
-SYSTEM = """Ти — помічник у застосунку Nosi Tempo: задачі та облік часу одного розробника.
+SYSTEM = """Ти — помічник у Telegram-боті Nosi Tempo: задачі та облік часу користувача.
 Відповідай українською, коротко і по суті, без зайвих вступів. Форматування: звичайний текст,
 можна короткі списки з дефісом. Не вигадуй задач чи цифр, яких немає в даних нижче.
 
@@ -76,11 +76,11 @@ ADD: <назва> <дата/час словами> #<проєкт> !<1-4>
 """
 
 
-async def _claude(s: Settings, session: aiohttp.ClientSession, system: str, msgs: list[dict]) -> str:
+async def _claude(s: Settings, key: str, session: aiohttp.ClientSession, system: str, msgs: list[dict]) -> str:
     async with session.post(
         "https://api.anthropic.com/v1/messages",
         headers={
-            "x-api-key": s.anthropic_key,
+            "x-api-key": key,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         },
@@ -92,10 +92,10 @@ async def _claude(s: Settings, session: aiohttp.ClientSession, system: str, msgs
         return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
 
 
-async def _openai(s: Settings, session: aiohttp.ClientSession, system: str, msgs: list[dict]) -> str:
+async def _openai(s: Settings, key: str, session: aiohttp.ClientSession, system: str, msgs: list[dict]) -> str:
     async with session.post(
         f"{s.openai_base_url}/chat/completions",
-        headers={"Authorization": f"Bearer {s.openai_key}"},
+        headers={"Authorization": f"Bearer {key}"},
         json={"model": s.openai_model, "messages": [{"role": "system", "content": system}, *msgs]},
     ) as r:
         data = await r.json(content_type=None)
@@ -105,14 +105,14 @@ async def _openai(s: Settings, session: aiohttp.ClientSession, system: str, msgs
         return data["choices"][0]["message"]["content"] or ""
 
 
-async def _gemini(s: Settings, session: aiohttp.ClientSession, system: str, msgs: list[dict]) -> str:
+async def _gemini(s: Settings, key: str, session: aiohttp.ClientSession, system: str, msgs: list[dict]) -> str:
     contents = [
         {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
         for m in msgs
     ]
     async with session.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{s.gemini_model}:generateContent",
-        headers={"x-goog-api-key": s.gemini_key},
+        headers={"x-goog-api-key": key},
         json={"systemInstruction": {"parts": [{"text": system}]}, "contents": contents},
     ) as r:
         data = await r.json(content_type=None)
@@ -128,8 +128,32 @@ async def _gemini(s: Settings, session: aiohttp.ClientSession, system: str, msgs
 CALLS = {"claude": _claude, "openai": _openai, "gemini": _gemini}
 
 
-async def ask(settings: Settings, store: Store, user_id: int, message: str, provider: str | None = None) -> dict:
-    name = pick_provider(settings, provider or await store.ai_provider(user_id))
+def _check_request(s: Settings, provider: str, key: str) -> tuple[str, dict]:
+    if provider == "gemini":
+        return "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1", {"x-goog-api-key": key}
+    if provider == "claude":
+        return "https://api.anthropic.com/v1/models?limit=1", {"x-api-key": key, "anthropic-version": "2023-06-01"}
+    return f"{s.openai_base_url}/models", {"Authorization": f"Bearer {key}"}
+
+
+# True — ключ робочий, False — провайдер його відхилив, None — перевірити не вдалося (мережа, ліміти)
+async def check_key(s: Settings, provider: str, key: str) -> bool | None:
+    url, headers = _check_request(s, provider, key)
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as session:
+            async with session.get(url, headers=headers) as r:
+                if r.status in (400, 401, 403):
+                    return False
+                return r.status < 300 or None
+    except (aiohttp.ClientError, TimeoutError):
+        return None
+
+
+async def ask(settings: Settings, store: Store, user_id: int, message: str) -> dict:
+    name = await pick_provider(store, user_id)
+    key = await store.ai_key(user_id, name) if name else None
+    if not name or not key:
+        raise AIError("Асистент не підключений. Додай свій ключ командою /ai.")
     history = await store.ai_history(user_id, 12)
     msgs = [{"role": h["role"], "content": h["content"]} for h in history]
     msgs.append({"role": "user", "content": message})
@@ -137,7 +161,7 @@ async def ask(settings: Settings, store: Store, user_id: int, message: str, prov
 
     try:
         async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
-            reply = (await CALLS[name](settings, session, system, msgs)).strip()
+            reply = (await CALLS[name](settings, key, session, system, msgs)).strip()
     except aiohttp.ClientError as exc:
         raise AIError(f"{LABELS[name]}: немає звʼязку ({exc.__class__.__name__}).") from exc
     except TimeoutError as exc:

@@ -49,16 +49,29 @@ HELP = """<b>Nosi Tempo</b> — задачі й облік часу.
 /stop — зупинити
 /log 45m назва #проєкт — дописати час вручну
 /report — звіт за тиждень
+"""
+
+HELP_AI_ON = """
 
 <b>Асистент</b> — повідомлення зі знаком питання на початку:
 <code>? що мені зробити першим сьогодні</code>
-/ai — обрати модель, /forget — очистити памʼять розмови"""
+/ai — моделі й ключі, /forget — очистити памʼять розмови"""
+
+HELP_AI_OFF = """
+
+/ai — підключити асистента зі своїм API-ключем"""
+
+OFFER = """Можна підключити асистента: він бачить твої задачі й час, підкаже, з чого почати, і сам розпише план.
+
+Для цього потрібен твій власний API-ключ. У Gemini він безкоштовний. Ключ зберігається зашифрованим і використовується лише для твоїх запитів.
+
+Не зараз — без проблем, підключити можна будь-коли командою /ai."""
 
 
-class Access(BaseMiddleware):
+class Users(BaseMiddleware):
 
-    def __init__(self, settings: Settings, store: Store):
-        self.settings, self.store = settings, store
+    def __init__(self, store: Store):
+        self.store = store
 
     async def __call__(
         self,
@@ -68,12 +81,6 @@ class Access(BaseMiddleware):
     ) -> Any:
         user = getattr(event, "from_user", None)
         if user is None:
-            return None
-        if not self.settings.allowed(user.id):
-            if isinstance(event, Message):
-                await event.answer(f"Це приватний бот. Твій id: <code>{user.id}</code>")
-            elif isinstance(event, CallbackQuery):
-                await event.answer("Це приватний бот.", show_alert=True)
             return None
         await self.store.ensure_user(user.id, user.full_name or "")
         return await handler(event, data)
@@ -97,20 +104,31 @@ class TimerCb(CallbackData, prefix="tm"):
 
 
 class AiCb(CallbackData, prefix="ai"):
-    provider: str
+    action: str
+    provider: str = ""
 
 
 class Rename(StatesGroup):
     title = State()
 
 
-def main_kb(settings: Settings) -> ReplyKeyboardMarkup:
+class AddKey(StatesGroup):
+    key = State()
+
+
+async def has_ai(store: Store, uid: int) -> bool:
+    return bool(await store.ai_key_providers(uid))
+
+
+def main_kb(ai_on: bool) -> ReplyKeyboardMarkup:
     rows = [
         [KeyboardButton(text=BTN_TODAY), KeyboardButton(text=BTN_INBOX), KeyboardButton(text=BTN_NEXT)],
         [KeyboardButton(text=BTN_TIMER), KeyboardButton(text=BTN_REPORT), KeyboardButton(text=BTN_PROJECTS)],
     ]
     return ReplyKeyboardMarkup(
-        keyboard=rows, resize_keyboard=True, input_field_placeholder="Нова задача або ? питання"
+        keyboard=rows,
+        resize_keyboard=True,
+        input_field_placeholder="Нова задача або ? питання" if ai_on else "Нова задача",
     )
 
 
@@ -243,17 +261,29 @@ async def edit_or_send(cq: CallbackQuery, text: str, kb: InlineKeyboardMarkup | 
             await cq.message.answer(text, reply_markup=kb)
 
 
+async def send_help(message: Message, store: Store) -> None:
+    ai_on = await has_ai(store, message.from_user.id)
+    await message.answer(HELP + (HELP_AI_ON if ai_on else HELP_AI_OFF), reply_markup=main_kb(ai_on))
+
+
+def provider_rows(providers: list[str]) -> list[list[tuple[str, CallbackData]]]:
+    return [[(f"Підключити {ai.LABELS[p]}", AiCb(action="add", provider=p))] for p in providers]
+
+
 @router.message(CommandStart())
-async def on_start(message: Message, settings: Settings) -> None:
-    tail = ""
-    if not settings.owner_ids:
-        tail = f"\n\nТвій id: <code>{message.from_user.id}</code>. Впиши його в OWNER_IDS, щоб бот був лише твоїм."
-    await message.answer(HELP + tail, reply_markup=main_kb(settings))
+async def on_start(message: Message, state: FSMContext, store: Store) -> None:
+    await state.clear()
+    await send_help(message, store)
+    uid = message.from_user.id
+    if not await store.ai_offered(uid) and not await has_ai(store, uid):
+        await store.mark_ai_offered(uid)
+        rows = provider_rows(list(ai.LABELS)) + [[("Не зараз", AiCb(action="skip"))]]
+        await message.answer(OFFER, reply_markup=ikb(rows))
 
 
 @router.message(Command("help"))
-async def on_help(message: Message, settings: Settings) -> None:
-    await message.answer(HELP, reply_markup=main_kb(settings))
+async def on_help(message: Message, store: Store) -> None:
+    await send_help(message, store)
 
 
 @router.message(Command("today"))
@@ -431,28 +461,97 @@ async def on_report(message: Message, store: Store) -> None:
     await message.answer(await render_report(store, message.from_user.id))
 
 
+async def render_ai(store: Store, uid: int) -> tuple[str, InlineKeyboardMarkup]:
+    connected = await store.ai_key_providers(uid)
+    missing = [p for p in ai.LABELS if p not in connected]
+    if not connected:
+        text = OFFER.rsplit("\n\n", 1)[0] + "\n\nОбери, чий ключ додати:"
+        return text, ikb(provider_rows(missing))
+
+    current = await ai.pick_provider(store, uid)
+    rows: list[list[tuple[str, CallbackData]]] = []
+    for p in connected:
+        mark = "● " if p == current else ""
+        rows.append(
+            [(mark + ai.LABELS[p], AiCb(action="use", provider=p)), ("Видалити ключ", AiCb(action="del", provider=p))]
+        )
+    rows += provider_rows(missing)
+    text = f"Зараз відповідає <b>{ai.LABELS[current]}</b>.\n\nНатисни на модель, щоб відповідала вона."
+    return text, ikb(rows)
+
+
 @router.message(Command("ai"))
-async def on_ai(message: Message, command: CommandObject, settings: Settings, store: Store) -> None:
-    if command.args:
+async def on_ai(message: Message, command: CommandObject, state: FSMContext, settings: Settings, store: Store) -> None:
+    await state.clear()
+    if command.args and await has_ai(store, message.from_user.id):
         await answer_ai(message, command.args, settings, store)
         return
-    available = settings.ai_providers()
-    if not available:
-        await message.answer(
-            "Ключів ШІ немає. Безкоштовний варіант — Gemini: візьми ключ на aistudio.google.com "
-            "і впиши в .env як GEMINI_API_KEY."
-        )
-        return
-    current = ai.pick_provider(settings, await store.ai_provider(message.from_user.id))
-    rows = [[(("● " if p == current else "") + ai.LABELS[p], AiCb(provider=p))] for p in available]
-    await message.answer(f"Зараз відповідає <b>{ai.LABELS[current]}</b>. Обери модель:", reply_markup=ikb(rows))
+    text, kb = await render_ai(store, message.from_user.id)
+    await message.answer(text, reply_markup=kb)
 
 
 @router.callback_query(AiCb.filter())
-async def on_ai_cb(cq: CallbackQuery, callback_data: AiCb, store: Store) -> None:
-    await store.set_ai_provider(cq.from_user.id, callback_data.provider)
-    await edit_or_send(cq, f"Тепер відповідає <b>{ai.LABELS[callback_data.provider]}</b>.", None)
-    await cq.answer()
+async def on_ai_cb(cq: CallbackQuery, callback_data: AiCb, state: FSMContext, store: Store) -> None:
+    uid, action, provider = cq.from_user.id, callback_data.action, callback_data.provider
+    if action == "skip":
+        await state.clear()
+        await edit_or_send(cq, "Добре. Якщо передумаєш — /ai.", None)
+        await cq.answer()
+        return
+    if action == "add":
+        url, price = ai.KEY_HELP[provider]
+        await state.set_state(AddKey.key)
+        await state.update_data(provider=provider)
+        await edit_or_send(
+            cq,
+            f"<b>{ai.LABELS[provider]}</b>, {price}.\n\n"
+            f"1. Відкрий {url} і створи ключ.\n"
+            "2. Надішли його сюди одним повідомленням.\n\n"
+            "Повідомлення з ключем я одразу видалю з чату.",
+            ikb([[("Скасувати", AiCb(action="cancel"))]]),
+        )
+        await cq.answer()
+        return
+    note = None
+    if action == "cancel":
+        await state.clear()
+    elif action == "use":
+        await store.set_ai_provider(uid, provider)
+    elif action == "del":
+        await store.delete_ai_key(uid, provider)
+        note = f"Ключ {ai.LABELS[provider]} видалено"
+    text, kb = await render_ai(store, uid)
+    await edit_or_send(cq, text, kb)
+    await cq.answer(note)
+
+
+@router.message(AddKey.key, F.text, ~F.text.in_(MENU_BUTTONS), ~F.text.startswith("/"))
+async def on_key(message: Message, state: FSMContext, settings: Settings, store: Store) -> None:
+    provider = (await state.get_data())["provider"]
+    key = message.text.strip()
+    if len(key) < 20 or any(c.isspace() for c in key):
+        # схоже на звичайне повідомлення: виходимо з режиму ключа і обробляємо його як завжди
+        await state.clear()
+        await on_text(message, settings, store)
+        return
+    try:
+        await message.delete()
+    except TelegramBadRequest:
+        pass
+    await message.bot.send_chat_action(message.chat.id, "typing")
+    ok = await ai.check_key(settings, provider, key)
+    if ok is False:
+        await message.answer(f"{ai.LABELS[provider]} не прийняв цей ключ. Перевір його і надішли ще раз.")
+        return
+    await state.clear()
+    await store.set_ai_key(message.from_user.id, provider, key)
+    note = "" if ok else " Перевірити його зараз не вдалося, тож якщо щось не так — /ai."
+    await message.answer(
+        f"Готово, підключено {ai.LABELS[provider]}.{note}\n\n"
+        "Пиши питання зі знаком <code>?</code> на початку, наприклад:\n"
+        "<code>? з чого мені почати сьогодні</code>",
+        reply_markup=main_kb(True),
+    )
 
 
 @router.message(Command("forget"))
@@ -482,7 +581,7 @@ async def answer_ai(message: Message, question: str, settings: Settings, store: 
 @router.message(F.text & ~F.text.startswith("/"))
 async def on_text(message: Message, settings: Settings, store: Store) -> None:
     text = message.text.strip()
-    if text.startswith("?"):
+    if text.startswith("?") and await has_ai(store, message.from_user.id):
         await answer_ai(message, text.lstrip("? ").strip() or text, settings, store)
         return
     task = await store.add_task(message.from_user.id, parse_task(text, store.today()))
@@ -512,10 +611,10 @@ async def reminders(bot: Bot, store: Store) -> None:
         await asyncio.sleep(30)
 
 
-async def setup(bot: Bot, dp: Dispatcher, settings: Settings, store: Store) -> None:
-    access = Access(settings, store)
-    dp.message.outer_middleware(access)
-    dp.callback_query.outer_middleware(access)
+async def setup(bot: Bot, dp: Dispatcher, store: Store) -> None:
+    users = Users(store)
+    dp.message.outer_middleware(users)
+    dp.callback_query.outer_middleware(users)
     dp.include_router(router)
 
     await bot.set_my_commands(
@@ -528,7 +627,7 @@ async def setup(bot: Bot, dp: Dispatcher, settings: Settings, store: Store) -> N
             BotCommand(command="stop", description="Зупинити таймер"),
             BotCommand(command="log", description="Дописати час: /log 45m назва"),
             BotCommand(command="report", description="Звіт за тиждень"),
-            BotCommand(command="ai", description="Асистент і вибір моделі"),
+            BotCommand(command="ai", description="Асистент: підключити або налаштувати"),
             BotCommand(command="help", description="Як користуватися"),
         ]
     )
