@@ -158,3 +158,32 @@ def test_assistant_needs_a_key(tmp_path):
         await s.close()
 
     asyncio.run(go())
+
+
+def test_assistant_falls_back_to_next_model(tmp_path, monkeypatch):
+    async def go():
+        s = Store(tmp_path / "f.db", ZoneInfo("Europe/Kyiv"))
+        await s.open()
+        await s.ensure_user(UID, "me")
+        await s.set_ai_key(UID, "gemini", "AIza-secret-value-123456")
+        settings = Settings(
+            bot_token="x", tz=s.tz, db_path=s.path, secret_key=b"",
+            anthropic_model="", openai_model="", openai_base_url="",
+            gemini_model="busy-model, good-model",
+        )
+        tried = []
+
+        async def fake(s_, model, key, session, system, msgs):
+            tried.append(model)
+            if model == "busy-model":
+                raise ai.Busy()
+            return "Почни з навчання.\nADD: Навчання завтра о 9 #навчання"
+
+        monkeypatch.setitem(ai.CALLS, "gemini", fake)
+        result = await ai.ask(settings, s, UID, "що робити?")
+        assert tried == ["busy-model", "good-model"]
+        assert result["reply"] == "Почни з навчання."
+        assert [t["title"] for t in result["added"]] == ["Навчання"]
+        await s.close()
+
+    asyncio.run(go())

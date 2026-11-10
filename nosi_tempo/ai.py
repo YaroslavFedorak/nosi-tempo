@@ -16,7 +16,6 @@ KEY_HELP = {
     "claude": ("console.anthropic.com/settings/keys", "оплата за використання"),
     "openai": ("platform.openai.com/api-keys", "оплата за використання"),
 }
-TIMEOUT = aiohttp.ClientTimeout(total=90)
 # асистент додає задачі рядками «ADD: ...», ми їх парсимо і прибираємо з відповіді
 RX_ADD = re.compile(r"^\s*ADD:\s*(.+?)\s*$", re.MULTILINE)
 
@@ -76,56 +75,76 @@ ADD: <назва> <дата/час словами> #<проєкт> !<1-4>
 """
 
 
-async def _claude(s: Settings, key: str, session: aiohttp.ClientSession, system: str, msgs: list[dict]) -> str:
-    async with session.post(
+# модель перевантажена або не відповіла вчасно — варто спробувати наступну
+class Busy(Exception):
+    pass
+
+
+ATTEMPT_TIMEOUT = aiohttp.ClientTimeout(total=25)
+RETRY_STATUSES = {429, 500, 502, 503, 504}
+
+
+async def _post(session: aiohttp.ClientSession, label: str, url: str, headers: dict, body: dict) -> dict:
+    try:
+        async with session.post(url, headers=headers, json=body, timeout=ATTEMPT_TIMEOUT) as r:
+            data = await r.json(content_type=None)
+            if r.status in RETRY_STATUSES:
+                raise Busy()
+            if r.status >= 400:
+                err = data.get("error", {}) if isinstance(data, dict) else {}
+                raise AIError(f"{label}: {err.get('message', r.status) if isinstance(err, dict) else err}")
+            return data
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        raise Busy() from exc
+
+
+async def _claude(s: Settings, model: str, key: str, session, system: str, msgs: list[dict]) -> str:
+    data = await _post(
+        session,
+        "Claude",
         "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={"model": s.anthropic_model, "max_tokens": 1500, "system": system, "messages": msgs},
-    ) as r:
-        data = await r.json(content_type=None)
-        if r.status >= 400:
-            raise AIError(f"Claude: {data.get('error', {}).get('message', r.status)}")
-        return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
+        {"x-api-key": key, "anthropic-version": "2023-06-01"},
+        {"model": model, "max_tokens": 1500, "system": system, "messages": msgs},
+    )
+    return "".join(b.get("text", "") for b in data.get("content", []) if b.get("type") == "text")
 
 
-async def _openai(s: Settings, key: str, session: aiohttp.ClientSession, system: str, msgs: list[dict]) -> str:
-    async with session.post(
+async def _openai(s: Settings, model: str, key: str, session, system: str, msgs: list[dict]) -> str:
+    data = await _post(
+        session,
+        "ChatGPT",
         f"{s.openai_base_url}/chat/completions",
-        headers={"Authorization": f"Bearer {key}"},
-        json={"model": s.openai_model, "messages": [{"role": "system", "content": system}, *msgs]},
-    ) as r:
-        data = await r.json(content_type=None)
-        if r.status >= 400:
-            err = data.get("error", {})
-            raise AIError(f"ChatGPT: {err.get('message', r.status) if isinstance(err, dict) else err}")
-        return data["choices"][0]["message"]["content"] or ""
+        {"Authorization": f"Bearer {key}"},
+        {"model": model, "messages": [{"role": "system", "content": system}, *msgs]},
+    )
+    return data["choices"][0]["message"]["content"] or ""
 
 
-async def _gemini(s: Settings, key: str, session: aiohttp.ClientSession, system: str, msgs: list[dict]) -> str:
+async def _gemini(s: Settings, model: str, key: str, session, system: str, msgs: list[dict]) -> str:
     contents = [
         {"role": "model" if m["role"] == "assistant" else "user", "parts": [{"text": m["content"]}]}
         for m in msgs
     ]
-    async with session.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{s.gemini_model}:generateContent",
-        headers={"x-goog-api-key": key},
-        json={"systemInstruction": {"parts": [{"text": system}]}, "contents": contents},
-    ) as r:
-        data = await r.json(content_type=None)
-        if r.status >= 400:
-            raise AIError(f"Gemini: {data.get('error', {}).get('message', r.status)}")
-        candidates = data.get("candidates") or []
-        if not candidates:
-            raise AIError("Gemini повернув порожню відповідь.")
-        parts = candidates[0].get("content", {}).get("parts", [])
-        return "".join(p.get("text", "") for p in parts)
+    data = await _post(
+        session,
+        "Gemini",
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        {"x-goog-api-key": key},
+        {"systemInstruction": {"parts": [{"text": system}]}, "contents": contents},
+    )
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise Busy()
+    parts = candidates[0].get("content", {}).get("parts", [])
+    return "".join(p.get("text", "") for p in parts if not p.get("thought"))
 
 
 CALLS = {"claude": _claude, "openai": _openai, "gemini": _gemini}
+
+
+def models_for(s: Settings, provider: str) -> list[str]:
+    raw = {"claude": s.anthropic_model, "openai": s.openai_model, "gemini": s.gemini_model}[provider]
+    return [m.strip() for m in raw.split(",") if m.strip()]
 
 
 def _check_request(s: Settings, provider: str, key: str) -> tuple[str, dict]:
@@ -159,13 +178,17 @@ async def ask(settings: Settings, store: Store, user_id: int, message: str) -> d
     msgs.append({"role": "user", "content": message})
     system = SYSTEM.format(context=await build_context(store, user_id))
 
-    try:
-        async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
-            reply = (await CALLS[name](settings, key, session, system, msgs)).strip()
-    except aiohttp.ClientError as exc:
-        raise AIError(f"{LABELS[name]}: немає звʼязку ({exc.__class__.__name__}).") from exc
-    except TimeoutError as exc:
-        raise AIError(f"{LABELS[name]} не відповів за 90 секунд.") from exc
+    reply = None
+    async with aiohttp.ClientSession() as session:
+        # моделі з налаштувань пробуємо по черзі, поки одна не відповість
+        for model in models_for(settings, name):
+            try:
+                reply = (await CALLS[name](settings, model, key, session, system, msgs)).strip()
+                break
+            except Busy:
+                continue
+    if reply is None:
+        raise AIError(f"{LABELS[name]} зараз перевантажений і не відповідає. Спробуй за кілька хвилин.")
 
     added = []
     for line in RX_ADD.findall(reply):

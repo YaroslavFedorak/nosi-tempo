@@ -56,5 +56,5 @@ def load_settings() -> Settings:
         anthropic_model=env("ANTHROPIC_MODEL", "claude-haiku-5-5"),
         openai_model=env("OPENAI_MODEL", "gpt-5-mini"),
         openai_base_url=env("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
-        gemini_model=env("GEMINI_MODEL", "gemini-flash-latest"),
+        gemini_model=env("GEMINI_MODEL", "gemini-flash-latest,gemini-3-flash-preview,gemini-flash-lite-latest"),
     )

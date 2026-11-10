@@ -52,13 +52,11 @@ HELP = """<b>Nosi Tempo</b> — задачі й облік часу.
 """
 
 HELP_AI_ON = """
-
 <b>Асистент</b> — повідомлення зі знаком питання на початку:
 <code>? що мені зробити першим сьогодні</code>
 /ai — моделі й ключі, /forget — очистити памʼять розмови"""
 
 HELP_AI_OFF = """
-
 /ai — підключити асистента зі своїм API-ключем"""
 
 OFFER = """Можна підключити асистента: він бачить твої задачі й час, підкаже, з чого почати, і сам розпише план.
@@ -560,19 +558,39 @@ async def on_forget(message: Message, store: Store) -> None:
     await message.answer("Памʼять розмови очищено.")
 
 
+async def keep_typing(bot: Bot, chat_id: int) -> None:
+    # статус «друкує» в Telegram гасне через 5 секунд, тому оновлюємо його, поки чекаємо модель
+    while True:
+        try:
+            await bot.send_chat_action(chat_id, "typing")
+        except TelegramBadRequest:
+            pass
+        await asyncio.sleep(4)
+
+
 async def answer_ai(message: Message, question: str, settings: Settings, store: Store) -> None:
-    await message.bot.send_chat_action(message.chat.id, "typing")
+    placeholder = await message.answer("<i>Думаю…</i>")
+    typing = asyncio.create_task(keep_typing(message.bot, message.chat.id))
     try:
         result = await ai.ask(settings, store, message.from_user.id, question)
     except ai.AIError as exc:
-        await message.answer(escape(str(exc)))
+        await placeholder.edit_text(escape(str(exc)))
         return
+    except Exception:
+        log.exception("помилка асистента")
+        await placeholder.edit_text("Щось пішло не так. Спробуй ще раз трохи згодом.")
+        return
+    finally:
+        typing.cancel()
+
     text = escape(result["reply"])
     if result["added"]:
         text += "\n\n<b>Додано:</b>\n" + "\n".join(f"— {escape(t['title'])}" for t in result["added"])
     text += f"\n\n<i>{result['label']}</i>"
-    for i in range(0, len(text), 4000):
-        await message.answer(text[i : i + 4000])
+    chunks = [text[i : i + 4000] for i in range(0, len(text), 4000)]
+    await placeholder.edit_text(chunks[0])
+    for chunk in chunks[1:]:
+        await message.answer(chunk)
 
 
 # має бути останнім хендлером: ловить будь-який текст як нову задачу
