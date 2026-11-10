@@ -43,7 +43,7 @@ class Settings:
 
 
 def load_settings() -> Settings:
-    load_dotenv(ROOT / ".env")
+    load_dotenv(ROOT / ".env", override=True)
     env = os.environ.get
 
     token = env("BOT_TOKEN", "").strip()
