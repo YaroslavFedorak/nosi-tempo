@@ -22,6 +22,7 @@ class Settings:
     openai_model: str
     openai_base_url: str
     gemini_model: str
+    log_file: str = ""
 
 
 def _secret_key(db_path: Path) -> bytes:
@@ -57,4 +58,5 @@ def load_settings() -> Settings:
         openai_model=env("OPENAI_MODEL", "gpt-5-mini"),
         openai_base_url=env("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
         gemini_model=env("GEMINI_MODEL", "gemini-flash-latest,gemini-3-flash-preview,gemini-flash-lite-latest"),
+        log_file=env("LOG_FILE", "").strip(),
     )

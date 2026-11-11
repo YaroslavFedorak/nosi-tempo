@@ -13,8 +13,13 @@ from .db import Store
 
 
 async def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = load_settings()
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        filename=settings.log_file or None,
+        encoding="utf-8",
+    )
 
     store = Store(settings.db_path, settings.tz, settings.secret_key)
     await store.open()

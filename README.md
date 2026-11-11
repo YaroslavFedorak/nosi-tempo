@@ -81,6 +81,9 @@ cp .env.example .env             # set BOT_TOKEN
 python -m nosi_tempo
 ```
 
+On Windows, `pythonw scriptsun_hidden.pyw` runs the bot without a console window and writes the log
+to `data/bot.log`, which is handy as a Task Scheduler action at logon.
+
 Docker:
 
 ```bash
