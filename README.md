@@ -1,4 +1,9 @@
-# Nosi Tempo
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="brand/png/2-transparent/nosi-tempo-lockup-dark.png">
+    <img src="brand/png/2-transparent/nosi-tempo-lockup-light.png" alt="Nosi Tempo" width="520">
+  </picture>
+</p>
 
 A task manager and time tracker as a Telegram bot. Think of a small Todoist and
 Toggl Track in one chat, with an optional LLM assistant that can read your tasks and plan with you.
@@ -81,7 +86,8 @@ cp .env.example .env             # set BOT_TOKEN
 python -m nosi_tempo
 ```
 
-On Windows, `pythonw scriptsun_hidden.pyw` runs the bot without a console window and writes the log
+On Windows, `pythonw scripts
+un_hidden.pyw` runs the bot without a console window and writes the log
 to `data/bot.log`, which is handy as a Task Scheduler action at logon.
 
 Docker:
@@ -113,3 +119,9 @@ nosi_tempo/
   fmt.py          message formatting
 tests/
 ```
+
+## Brand
+
+The mark is a lowercase n drawn as a progress bar: the part behind the playhead is time already
+spent, the part after it is what is left. Colours sit between Todoist's red and Toggl Track's orchid,
+on a plum ink. All versions (light, dark, transparent, avatars) are in [`brand/`](brand), as SVG and PNG.

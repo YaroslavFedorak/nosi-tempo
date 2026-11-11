@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024"><rect width="1024" height="1024" fill="#EC4E5F"/>
+<g transform="translate(-27.46 -62.86) scale(1.08108)">
+<defs><mask id="knob-gap" maskUnits="userSpaceOnUse" x="-200" y="-200" width="1424" height="1424"><rect x="-200" y="-200" width="1424" height="1424" fill="#fff"/><circle cx="580.58" cy="414.98" r="100" fill="#000"/></mask></defs>
+<g mask="url(#knob-gap)">
+<path d="M 580.58 414.98 A 165 165 0 0 1 644 545 L 644 742" fill="none" stroke="#1F1226" stroke-width="116" stroke-linecap="round"/>
+<path d="M 314 742 L 314 545 A 165 165 0 0 1 580.58 414.98" fill="none" stroke="#FFF3EC" stroke-width="116" stroke-linecap="round"/>
+</g>
+<circle cx="580.58" cy="414.98" r="80" fill="#1F1226"/>
+</g>
+</svg>
